@@ -24,6 +24,7 @@ nothing about how they already work.
 
 ```
 docs/      research: AI extraction costs & model choice, WhatsApp ingestion risk
+app/       student mobile app — React Native + Expo (TypeScript)
 server/    ingestion + extraction service, and the planner API (Node 22.13+/24, TypeScript)
   src/
     types.ts             core contracts: IncomingMessage, MessageSource, ExtractedEvent
@@ -83,11 +84,33 @@ No auth yet (student ids are unguessable UUIDs — fine for a closed pilot, not 
 - Group onboarding includes class-rep consent and a visible "ClassMate 📚" bot identity —
   invisible means *no behavior change*, not covert.
 
+## Mobile app (`app/`)
+
+The student-facing planner: a dark, premium React Native + Expo app that renders the
+Planner API's merged feed. Three tabs — **Planner** (Next-up hero + events bucketed into
+Today / Tomorrow / This week / Later), **Groups** (the class groups being read for you), and
+**Profile**. Ships with bundled demo data so it runs with no server; point it at a live
+server by setting `EXPO_PUBLIC_API_URL`.
+
+```bash
+cd app
+npm install
+npx expo start        # scan the QR with Expo Go (Android/iOS)
+
+# Live data (phone must reach your machine — use its LAN IP, not localhost):
+EXPO_PUBLIC_API_URL=http://192.168.x.x:4000 npx expo start
+```
+
+Stack: Expo SDK 57, React Navigation (custom floating tab bar), Reanimated entrance
+animations, lucide icons, Sora + Inter fonts, design tokens in `app/src/theme/tokens.ts`.
+
 ## Roadmap
 
 - [x] Ingestion + extraction core
 - [x] Planner API (serve events; per-student group subscriptions)
+- [x] Mobile app skeleton (planner UI, premium dark design)
 - [ ] Extraction eval set from real exported group chats (150–200 labeled messages)
-- [ ] Mobile app (planner UI + push notifications)
+- [ ] Wire the app to a hosted server + student onboarding flow
+- [ ] Push notifications
 - [ ] Session supervisor for multiple bot numbers + health dashboard
 - [ ] Real auth for the Planner API before wider rollout
