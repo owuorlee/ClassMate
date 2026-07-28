@@ -6,3 +6,7 @@ dist/
 auth/
 baileys-auth/
 *.log
+
+# Real chat exports and derived eval data: PII-bearing, never commit
+TXT Files/
+server/eval-data/

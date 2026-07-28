@@ -1,0 +1,184 @@
+<meta charset="utf-8">
+<title>ClassMate Labeler</title>
+<style>
+  :root {
+    --bg:#08080C; --surface:#14141F; --surface2:#1B1B29; --border:rgba(255,255,255,.09);
+    --text:#F6F6FA; --muted:#A4A4B8; --dim:#6C6C82; --primary:#7C5CFF; --bright:#9D86FF;
+    --ok:#34D399; --no:#FF5D73;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh}
+  header{padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  h1{font-size:15px;margin:0;letter-spacing:.3px}
+  .bar{flex:1;height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;min-width:120px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--bright))}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--border);
+         background:var(--surface2);color:var(--text);padding:7px 12px}
+  button:hover{border-color:var(--bright)}
+  main{flex:1;display:grid;grid-template-columns:1fr 380px;overflow:hidden}
+  #ctx{overflow-y:auto;padding:20px}
+  .m{padding:9px 13px;border-radius:10px;margin:5px 0;background:var(--surface);border:1px solid transparent;max-width:760px}
+  .m.cur{border-color:var(--primary);background:var(--surface2);box-shadow:0 0 0 3px rgba(124,92,255,.15)}
+  .m .meta{font-size:11px;color:var(--dim);margin-bottom:3px}
+  .m .rep{color:var(--bright);font-weight:600}
+  .m .txt{font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+  aside{border-left:1px solid var(--border);padding:20px;overflow-y:auto;background:#0B0B12}
+  h2{font-size:11px;text-transform:uppercase;letter-spacing:1.3px;color:var(--dim);margin:20px 0 8px}
+  h2:first-child{margin-top:0}
+  .keys{display:flex;flex-wrap:wrap;gap:6px}
+  .k{padding:6px 10px;border-radius:7px;background:var(--surface);border:1px solid var(--border);font-size:12.5px}
+  .k b{color:var(--bright);font-family:ui-monospace,monospace}
+  .k.on{background:rgba(124,92,255,.18);border-color:var(--primary)}
+  .k.yes.on{background:rgba(52,211,153,.18);border-color:var(--ok)}
+  .k.no.on{background:rgba(255,93,115,.16);border-color:var(--no)}
+  input[type=text]{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);
+                   background:var(--surface);color:var(--text);font:inherit;font-size:13px;margin-bottom:6px}
+  .hint{font-size:11.5px;color:var(--dim);line-height:1.6}
+  .done{color:var(--ok)}
+</style>
+
+<header>
+  <h1>ClassMate · Labeler</h1>
+  <input type="file" id="file" accept=".jsonl" style="font-size:12px">
+  <div class="bar"><i id="prog" style="width:0"></i></div>
+  <span id="count" class="hint">no file</span>
+  <button id="save">Save labels ⌘S</button>
+</header>
+
+<main>
+  <div id="ctx"></div>
+  <aside>
+    <h2>Academic?</h2>
+    <div class="keys">
+      <span class="k yes" id="ky"><b>Y</b> yes</span>
+      <span class="k no" id="kn"><b>N</b> no / noise</span>
+    </div>
+
+    <h2>Type <span class="hint">(if yes)</span></h2>
+    <div class="keys" id="types"></div>
+
+    <h2>Action</h2>
+    <div class="keys" id="actions"></div>
+
+    <h2>Fields <span class="hint">(optional but valuable)</span></h2>
+    <input type="text" id="course" placeholder="course, e.g. Soil Mechanics">
+    <input type="text" id="datetime" placeholder="when, e.g. 2026-04-09T08:00">
+    <input type="text" id="venue" placeholder="venue, e.g. CTC LH">
+
+    <h2>Keys</h2>
+    <div class="hint">
+      <b>Y</b>/<b>N</b> academic · <b>1–6</b> type · <b>C/U/X</b> create/update/cancel<br>
+      <b>→</b> or <b>Enter</b> next · <b>←</b> back · <b>S</b> skip unsure<br>
+      Labels auto-save to your browser; click <b>Save labels</b> to download.
+    </div>
+    <h2>Guidance</h2>
+    <div class="hint">
+      Mark <b>yes</b> only for actionable academic info: CATs, exams, deadlines,
+      class time/venue changes or cancellations, shared materials, official notices.<br><br>
+      Mark <b>no</b> for questions ("kuna class leo?"), social chatter, jokes,
+      sports, and mere acknowledgements — even if they mention a course.
+    </div>
+  </aside>
+</main>
+
+<script>
+const TYPES = [['1','cat'],['2','exam'],['3','assignment'],['4','class_update'],['5','material'],['6','announcement']];
+const ACTIONS = [['c','create'],['u','update'],['x','cancel']];
+let rows = [], i = 0;
+
+const $ = id => document.getElementById(id);
+const STORE = 'classmate-labels';
+
+TYPES.forEach(([k,v]) => $('types').insertAdjacentHTML('beforeend', `<span class="k" data-type="${v}"><b>${k}</b> ${v}</span>`));
+ACTIONS.forEach(([k,v]) => $('actions').insertAdjacentHTML('beforeend', `<span class="k" data-action="${v}"><b>${k.toUpperCase()}</b> ${v}</span>`));
+
+$('file').onchange = async e => {
+  const text = await e.target.files[0].text();
+  rows = text.trim().split('\n').map(JSON.parse);
+  const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+  rows.forEach(r => { if (saved[r.id]) r.label = saved[r.id]; });
+  i = rows.findIndex(r => !r.label); if (i < 0) i = 0;
+  render();
+};
+
+function cur() { return rows[i]; }
+function label() {
+  const r = cur();
+  if (!r.label) r.label = { academic: null, type: null, action: null, course: '', datetime: '', venue: '' };
+  return r.label;
+}
+
+function persist() {
+  const saved = {};
+  rows.forEach(r => { if (r.label) saved[r.id] = r.label; });
+  localStorage.setItem(STORE, JSON.stringify(saved));
+}
+
+function render() {
+  if (!rows.length) return;
+  const from = Math.max(0, i - 6), to = Math.min(rows.length, i + 7);
+  $('ctx').innerHTML = rows.slice(from, to).map((r, n) => {
+    const idx = from + n, done = r.label && r.label.academic !== null;
+    return `<div class="m ${idx===i?'cur':''}">
+      <div class="meta">${r.timestamp.slice(0,16).replace('T',' ')} ·
+        <span class="${r.isRep?'rep':''}">${r.sender}</span> · ${r.group}
+        ${done ? `<span class="done">✓ ${r.label.academic ? (r.label.type||'yes') : 'no'}</span>` : ''}</div>
+      <div class="txt">${r.text.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</div>
+    </div>`;
+  }).join('');
+  const el = $('ctx').querySelector('.cur'); if (el) el.scrollIntoView({block:'center'});
+
+  const L = cur().label || {};
+  $('ky').classList.toggle('on', L.academic === true);
+  $('kn').classList.toggle('on', L.academic === false);
+  document.querySelectorAll('[data-type]').forEach(e => e.classList.toggle('on', L.type === e.dataset.type));
+  document.querySelectorAll('[data-action]').forEach(e => e.classList.toggle('on', L.action === e.dataset.action));
+  $('course').value = L.course || ''; $('datetime').value = L.datetime || ''; $('venue').value = L.venue || '';
+
+  const n = rows.filter(r => r.label && r.label.academic !== null).length;
+  $('count').textContent = `${n}/${rows.length} labeled · at #${i+1}`;
+  $('prog').style.width = (n / rows.length * 100) + '%';
+}
+
+function move(d) { i = Math.max(0, Math.min(rows.length - 1, i + d)); render(); }
+
+document.onkeydown = e => {
+  if (!rows.length) return;
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text') {
+    if (e.key === 'Enter') { saveFields(); move(1); }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); download(); return; }
+  const k = e.key.toLowerCase();
+  if (k === 'y') { label().academic = true; }
+  else if (k === 'n') { label().academic = false; label().type = null; label().action = null; }
+  else if (TYPES.some(t => t[0] === k)) { label().academic = true; label().type = TYPES.find(t => t[0] === k)[1]; if (!label().action) label().action = 'create'; }
+  else if (ACTIONS.some(a => a[0] === k)) { label().action = ACTIONS.find(a => a[0] === k)[1]; }
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') { move(1); persist(); return; }
+  else if (e.key === 'ArrowLeft') { move(-1); return; }
+  else if (k === 's') { move(1); return; }
+  else return;
+  e.preventDefault(); persist(); render();
+};
+
+function saveFields() {
+  const L = label();
+  L.course = $('course').value.trim();
+  L.datetime = $('datetime').value.trim();
+  L.venue = $('venue').value.trim();
+  if (L.academic === null && (L.course || L.datetime || L.venue)) L.academic = true;
+  persist();
+}
+['course','datetime','venue'].forEach(id => $(id).onblur = saveFields);
+
+function download() {
+  persist();
+  const out = rows.map(r => JSON.stringify(r)).join('\n') + '\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out], {type:'application/jsonl'}));
+  a.download = 'labeled.jsonl';
+  a.click();
+}
+$('save').onclick = download;
+</script>

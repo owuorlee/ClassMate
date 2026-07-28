@@ -16,6 +16,8 @@ import type { IncomingMessage, MessageHandler, MessageSource, SourceHealth } fro
 // date, time, (optional seconds), am/pm variants, then "- Sender: text" or "] Sender: text"
 const ANDROID_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?\s+-\s+([^:]+):\s(.*)$/;
 const IOS_RE = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?\]\s+([^:]+):\s(.*)$/;
+/** Any line that opens a new export entry, message or system notice. */
+const DATE_PREFIX_RE = /^\[?\d{1,2}\/\d{1,2}\/\d{2,4},\s/;
 
 export interface ParsedExportMessage {
   sender: string;
@@ -23,7 +25,31 @@ export interface ParsedExportMessage {
   timestamp: Date;
 }
 
-export function parseChatExport(raw: string): ParsedExportMessage[] {
+/** Which position holds the day: WhatsApp exports in the phone's locale. */
+export type DateOrder = 'DMY' | 'MDY';
+
+/**
+ * Detect whether an export is day-first or month-first. Real exports from the
+ * same class can differ (a phone set to en-GB vs en-US), and guessing wrong
+ * silently corrupts every date — or drops messages outright when the "month"
+ * lands above 12. So we scan the whole file for a disambiguating date:
+ * a first component > 12 proves DMY, a second component > 12 proves MDY.
+ */
+export function detectDateOrder(raw: string): DateOrder {
+  const re = /^\[?(\d{1,2})\/(\d{1,2})\/(\d{2,4}),/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a > 12) return 'DMY';
+    if (b > 12) return 'MDY';
+  }
+  // Fully ambiguous (every date has both parts <= 12). Kenyan phones default
+  // to day-first, so that is the safer assumption.
+  return 'DMY';
+}
+
+export function parseChatExport(raw: string, order: DateOrder = detectDateOrder(raw)): ParsedExportMessage[] {
   const messages: ParsedExportMessage[] = [];
   // Strip the left-to-right/invisible marks WhatsApp sprinkles into exports.
   const lines = raw.replace(/[‎‏‪-‮]/g, '').split(/\r?\n/);
@@ -31,7 +57,9 @@ export function parseChatExport(raw: string): ParsedExportMessage[] {
   for (const line of lines) {
     const m = ANDROID_RE.exec(line) ?? IOS_RE.exec(line);
     if (m) {
-      const [, dd, mm, yy, hh, min, ss, ampm, sender, text] = m;
+      const [, first, second, yy, hh, min, ss, ampm, sender, text] = m;
+      const dd = order === 'DMY' ? first : second;
+      const mm = order === 'DMY' ? second : first;
       let hours = Number(hh);
       if (ampm) {
         const pm = ampm.toLowerCase() === 'pm';
@@ -45,14 +73,24 @@ export function parseChatExport(raw: string): ParsedExportMessage[] {
         .toString()
         .padStart(2, '0')}:${min}:${(ss ?? '00').padStart(2, '0')}+03:00`;
       const timestamp = new Date(iso);
-      if (Number.isNaN(timestamp.getTime())) continue;
+      if (Number.isNaN(timestamp.getTime())) {
+        // Should not happen once the date order is right; loud because a silent
+        // skip here means quietly losing real messages.
+        console.warn(`[chatExport] unparseable date, skipping line: ${line.slice(0, 60)}`);
+        continue;
+      }
       messages.push({ sender: sender.trim(), text, timestamp });
+    } else if (DATE_PREFIX_RE.test(line)) {
+      // Starts a new entry but has no "Sender: text" — a system line
+      // ("X removed Y", "X joined using this group's invite link"). Drop it
+      // rather than appending, which would splice group admin noise into the
+      // previous message's text.
+      continue;
     } else if (messages.length > 0 && line.trim() !== '') {
       // Continuation of a multi-line message.
       messages[messages.length - 1].text += '\n' + line;
     }
-    // else: system lines ("Messages are end-to-end encrypted...") have no
-    // "Sender:" part and are dropped.
+    // else: blank lines and pre-first-message banners are dropped.
   }
 
   // Media placeholders carry no extractable text.
