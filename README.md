@@ -1,5 +1,9 @@
 # ClassMate
 
+> **New here — human or AI agent? Start with [docs/handoff/AGENT_ONBOARDING.md](docs/handoff/AGENT_ONBOARDING.md).**
+> The full handoff package (status, architecture, what's real vs stubbed, and the complete
+> roadmap to production) lives in [docs/handoff/](docs/handoff/).
+
 Turns Kenyan university WhatsApp class-group chatter into a clean personal planner. A silent
 bot account listens to class groups (via Baileys), an AI pipeline extracts the academic facts
 buried in Sheng/Kiswahili/English messages — CATs, assignment deadlines, venue changes, shared
